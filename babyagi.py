@@ -45,6 +45,9 @@ INITIAL_TASK = os.getenv("INITIAL_TASK", os.getenv("FIRST_TASK", ""))
 # Model configuration
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
 
+# Chromadb query configuration
+QUERY_RESULT_COUNT = int(os.getenv("QUERY_RESULT_COUNT", 10))
+
 # Extensions support begin
 
 def can_import(module_name):
@@ -456,54 +459,69 @@ if not JOIN_EXISTING_OBJECTIVE:
     tasks_storage.append(initial_task)
 
 def main ():
-    while True:
-        # As long as there are tasks in the storage...
-        if not tasks_storage.is_empty():
-            # Print the task list
-            print("\033[95m\033[1m" + "\n*****TASK LIST*****\n" + "\033[0m\033[0m")
-            for t in tasks_storage.get_task_names():
-                print(" • "+t)
+    mode = input("To start the Agent enter 'run', to query the database enter 'query': ")
+    if mode == "query":
+        while True:
+            query = input("Enter the query (or nothing to exit): ")
+            if query == "":
+                return
+            print(f"ChromaDB results for '{query}':")
+            print("---------------------------------")
+            for result in results_storage.query(query=query, top_results_num=QUERY_RESULT_COUNT):
+                print(result)
+    elif mode == "run":
+        # Run the agent
+        while True:
+            # As long as there are tasks in the storage...
+            if not tasks_storage.is_empty():
+                # Print the task list
+                print("\033[95m\033[1m" + "\n*****TASK LIST*****\n" + "\033[0m\033[0m")
+                for t in tasks_storage.get_task_names():
+                    print(" • "+t)
 
-            # Step 1: Pull the first incomplete task
-            task = tasks_storage.popleft()
-            print("\033[92m\033[1m" + "\n*****NEXT TASK*****\n" + "\033[0m\033[0m")
-            print(task['task_name'])
+                # Step 1: Pull the first incomplete task
+                task = tasks_storage.popleft()
+                print("\033[92m\033[1m" + "\n*****NEXT TASK*****\n" + "\033[0m\033[0m")
+                print(task['task_name'])
 
-            # Send to execution function to complete the task based on the context
-            result = execution_agent(OBJECTIVE, task["task_name"])
-            print("\033[93m\033[1m" + "\n*****TASK RESULT*****\n" + "\033[0m\033[0m")
-            print(result)
+                # Send to execution function to complete the task based on the context
+                result = execution_agent(OBJECTIVE, task["task_name"])
+                print("\033[93m\033[1m" + "\n*****TASK RESULT*****\n" + "\033[0m\033[0m")
+                print(result)
 
-            # Step 2: Enrich result and store in the results storage
-            # This is where you should enrich the result if needed
-            enriched_result = {
-                "data": result
-            }  
-            # extract the actual result from the dictionary
-            # since we don't do enrichment currently
-            vector = enriched_result["data"]  
+                # Step 2: Enrich result and store in the results storage
+                # This is where you should enrich the result if needed
+                enriched_result = {
+                    "data": result
+                }  
+                # extract the actual result from the dictionary
+                # since we don't do enrichment currently
+                vector = enriched_result["data"]  
 
-            result_id = f"result_{task['task_id']}"
+                result_id = f"result_{task['task_id']}"
 
-            results_storage.add(task, result, result_id, vector)
+                results_storage.add(task, result, result_id, vector)
 
-            # Step 3: Create new tasks and re-prioritize task list
-            # only the main instance in cooperative mode does that
-            new_tasks = task_creation_agent(
-                OBJECTIVE,
-                enriched_result,
-                task["task_name"],
-                tasks_storage.get_task_names(),
-            )
+                # Step 3: Create new tasks and reprioritize task list
+                # only the main instance in cooperative mode does that
+                new_tasks = task_creation_agent(
+                    OBJECTIVE,
+                    enriched_result,
+                    task["task_name"],
+                    tasks_storage.get_task_names(),
+                )
 
-            for new_task in new_tasks:
-                new_task.update({"task_id": tasks_storage.next_task_id()})
-                tasks_storage.append(new_task)
+                for new_task in new_tasks:
+                    new_task.update({"task_id": tasks_storage.next_task_id()})
+                    tasks_storage.append(new_task)
 
-            if not JOIN_EXISTING_OBJECTIVE: prioritization_agent()
+                if not JOIN_EXISTING_OBJECTIVE: prioritization_agent()
 
-        # Sleep a bit before checking the task list again
-        time.sleep(5) 
+            # Sleep a bit before checking the task list again
+            time.sleep(5) 
+    else:
+        print("Invalid input. Exiting...")
+        exit(1)
 
 if __name__ == "__main__":
     main()
